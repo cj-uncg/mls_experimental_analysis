@@ -481,17 +481,6 @@ impl TreeSyncDiff<'_> {
         path: &mut [(ParentNodeIndex, ParentNode)],
         leaf_index: LeafNodeIndex,
     ) -> Result<Vec<u8>, LibraryError> {
-        // If the path is empty, return a zero-length string. This is the case
-        // when the tree has only one leaf.
-        if path.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        // Compute the filtered copath corresponding to the given filtered
-        // direct path.
-        let filtered_copath = self.filtered_copath(leaf_index);
-        debug_assert_eq!(filtered_copath.len(), path.len());
-
         let modified_leaves_owned: Vec<(LeafNodeIndex, TreeSyncLeafNode)> =
             self.diff
                 .diff_leaves()
@@ -504,6 +493,16 @@ impl TreeSyncDiff<'_> {
                 .map(|(index, leaf)| (*index, leaf))
                 .collect();
         self.update_tree_hashes(crypto, ciphersuite, modified_leaves)?;
+
+        // Removals can change sibling subtree hashes even when the filtered path is empty.
+        if path.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Compute the filtered copath corresponding to the given filtered
+        // direct path.
+        let filtered_copath = self.filtered_copath(leaf_index);
+        debug_assert_eq!(filtered_copath.len(), path.len());
 
         // For every copath node, compute the tree hash.
         let copath_tree_hashes = filtered_copath.into_iter().map(|node_index| {

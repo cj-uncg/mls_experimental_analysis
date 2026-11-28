@@ -85,3 +85,53 @@ fn welcome_reuses_an_interior_gap_with_the_right_edge_occupied() {
     // Slot 3 remains occupied, so the next join should fill the gap at slot 2.
     check_join_after_removals(4, &[2], 2);
 }
+
+#[test]
+fn exported_tree_hash_after_removing_the_only_other_member() {
+    let creator = OpenMlsRustCrypto::default();
+    let (credential, signer) = identity("creator");
+    let config = MlsGroupCreateConfig::builder().ciphersuite(SUITE).build();
+    let mut group = MlsGroup::new(&creator, &signer, &config, credential).unwrap();
+
+    // Alice joins at leaf 1, so removing the creator leaves a blank at leaf 0.
+    let alice = OpenMlsRustCrypto::default();
+    let (alice_credential, alice_signer) = identity("Alice");
+    let package = KeyPackage::builder()
+        .build(SUITE, &alice, &alice_signer, alice_credential)
+        .unwrap();
+    let (_, message, _) = group
+        .add_members(&creator, &signer, &[package.key_package().clone()])
+        .unwrap();
+    group.merge_pending_commit(&creator).unwrap();
+    let mut alice_group = StagedWelcome::new_from_welcome(
+        &alice,
+        config.join_config(),
+        message.into_welcome().unwrap(),
+        Some(group.export_ratchet_tree().into()),
+    )
+    .unwrap()
+    .into_group(&alice)
+    .unwrap();
+    assert_eq!(alice_group.own_leaf_index().u32(), 1);
+
+    alice_group
+        .remove_members(&alice, &alice_signer, &[LeafNodeIndex::new(0)])
+        .unwrap();
+    alice_group.merge_pending_commit(&alice).unwrap();
+
+    // An independent observer recomputes the tree hash from the exported nodes.
+    let observer = OpenMlsRustCrypto::default();
+    let info = alice_group
+        .export_group_info(&alice, &alice_signer, false)
+        .unwrap()
+        .into_verifiable_group_info()
+        .unwrap();
+    PublicGroup::from_external(
+        observer.crypto(),
+        observer.storage(),
+        alice_group.export_ratchet_tree().into(),
+        info,
+        Default::default(),
+    )
+    .expect("the group's tree hash should include the blank leaf");
+}
